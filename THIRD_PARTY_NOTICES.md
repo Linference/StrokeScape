@@ -23,5 +23,9 @@ portable archive's `ThirdParty/` directory and the bundled Chromium directories.
 
 The current CPU portable edition does not bundle CuPy or the CUDA toolkit.
 
+Documentation diagrams use the MIT-licensed Archify / dynamic-archify template.
+The original license is preserved in `docs/diagrams/ARCHIFY-LICENSE.txt`; these
+documentation-only HTML and SVG assets are not part of the application runtime.
+
 No license has yet been selected for the StrokeScape project's own source code;
 publication of this repository does not change third-party license terms.

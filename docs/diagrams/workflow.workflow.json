@@ -1,0 +1,199 @@
+{
+  "schema_version": 1,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "StrokeScape · 从图片到绘画过程",
+    "subtitle": "结构感知 → 残差反馈 → 严格串行 → 交互与导出",
+    "output": "workflow.html"
+  },
+  "lanes": [
+    {
+      "id": "input",
+      "label": "INPUT & ANALYSIS · 图像与结构"
+    },
+    {
+      "id": "paint",
+      "label": "PAINTING LOOP · 笔触生成与反馈"
+    },
+    {
+      "id": "output",
+      "label": "PLAYBACK & EXPORT · 时间与输出"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "image",
+      "lane": "input",
+      "col": 0,
+      "type": "external",
+      "label": "导入与规范化",
+      "sublabel": "Pillow / EXIF"
+    },
+    {
+      "id": "features",
+      "lane": "input",
+      "col": 2,
+      "type": "backend",
+      "label": "图像结构分析",
+      "sublabel": "Sobel / Tensor"
+    },
+    {
+      "id": "layers",
+      "lane": "input",
+      "col": 5,
+      "type": "backend",
+      "label": "四层递进规划",
+      "sublabel": "铺底 → 细节"
+    },
+    {
+      "id": "sample",
+      "lane": "paint",
+      "col": 5,
+      "type": "backend",
+      "label": "残差引导采样",
+      "sublabel": "距离 / 颜色"
+    },
+    {
+      "id": "brush",
+      "lane": "paint",
+      "col": 2,
+      "type": "frontend",
+      "label": "生成风格笔触",
+      "sublabel": "8 brushes"
+    },
+    {
+      "id": "feedback",
+      "lane": "paint",
+      "col": 0,
+      "type": "backend",
+      "label": "残差与停止",
+      "sublabel": "ROI / early stop"
+    },
+    {
+      "id": "timeline",
+      "lane": "output",
+      "col": 0,
+      "type": "backend",
+      "label": "串行时间编排",
+      "sublabel": "path + timing"
+    },
+    {
+      "id": "canvas",
+      "lane": "output",
+      "col": 2,
+      "type": "frontend",
+      "label": "共享画布渲染",
+      "sublabel": "Canvas 2D"
+    },
+    {
+      "id": "exports",
+      "lane": "output",
+      "col": 5,
+      "type": "database",
+      "label": "播放与导出",
+      "sublabel": "HTML / MP4 / 工程"
+    }
+  ],
+  "edges": [
+    {
+      "from": "image",
+      "to": "features",
+      "variant": "emphasis"
+    },
+    {
+      "from": "features",
+      "to": "layers",
+      "variant": "emphasis"
+    },
+    {
+      "from": "layers",
+      "to": "sample",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "variant": "emphasis"
+    },
+    {
+      "from": "sample",
+      "to": "brush",
+      "variant": "emphasis"
+    },
+    {
+      "from": "brush",
+      "to": "feedback",
+      "variant": "emphasis"
+    },
+    {
+      "from": "feedback",
+      "to": "sample",
+      "fromSide": "top",
+      "toSide": "top",
+      "via": [
+        [
+          88,
+          205
+        ],
+        [
+          625,
+          205
+        ]
+      ],
+      "label": "继续细化",
+      "labelAt": [
+        365,
+        204
+      ],
+      "variant": "dashed"
+    },
+    {
+      "from": "feedback",
+      "to": "timeline",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "label": "预算完成 / 停止",
+      "labelAt": [
+        180,
+        292
+      ],
+      "variant": "emphasis"
+    },
+    {
+      "from": "timeline",
+      "to": "canvas",
+      "variant": "emphasis"
+    },
+    {
+      "from": "canvas",
+      "to": "exports",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "结构与反馈",
+      "items": [
+        "结构张量的切线方向引导笔触",
+        "每笔只更新影响区域内的残差",
+        "自适应停止为可选启发式策略"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "共享渲染",
+      "items": [
+        "Canvas 预览、HTML 与视频共用渲染器",
+        "逐笔播放、回退、缩放与原图对比",
+        "CPU 反馈预览与 Canvas 存在栅格差异"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "局部精修",
+      "items": [
+        "复制原作并只在选区追加笔触",
+        "新笔触携带矩形裁剪与独立笔刷参数",
+        "另存新作品，保留原作"
+      ]
+    }
+  ]
+}

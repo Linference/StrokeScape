@@ -1,0 +1,277 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "StrokeScape · 核心技术架构",
+    "subtitle": "浏览器或桌面窗口 + 本地 Python 服务；创作流程在用户本机完成",
+    "viewBox": [
+      1000,
+      700
+    ]
+  },
+  "components": [
+    {
+      "id": "ui",
+      "type": "frontend",
+      "label": "交互工作台",
+      "sublabel": "React 19 / TypeScript",
+      "pos": [
+        60,
+        90
+      ],
+      "size": [
+        220,
+        88
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "本地 API",
+      "sublabel": "FastAPI / Uvicorn",
+      "pos": [
+        390,
+        90
+      ],
+      "size": [
+        220,
+        88
+      ]
+    },
+    {
+      "id": "worker",
+      "type": "messagebus",
+      "label": "后台任务执行",
+      "sublabel": "ProcessPool / ThreadPool",
+      "pos": [
+        720,
+        90
+      ],
+      "size": [
+        220,
+        88
+      ]
+    },
+    {
+      "id": "renderer",
+      "type": "frontend",
+      "label": "共享绘制引擎",
+      "sublabel": "public/renderer.js · Canvas 2D",
+      "pos": [
+        60,
+        300
+      ],
+      "size": [
+        220,
+        88
+      ]
+    },
+    {
+      "id": "sqlite",
+      "type": "database",
+      "label": "作品元数据",
+      "sublabel": "SQLite · 标签 / 状态 / 回收站",
+      "pos": [
+        390,
+        300
+      ],
+      "size": [
+        220,
+        88
+      ]
+    },
+    {
+      "id": "engine",
+      "type": "backend",
+      "label": "笔触生成器",
+      "sublabel": "OpenCV / NumPy · CuPy 可选",
+      "pos": [
+        720,
+        300
+      ],
+      "size": [
+        220,
+        88
+      ]
+    },
+    {
+      "id": "html",
+      "type": "external",
+      "label": "离线交互作品",
+      "sublabel": "单文件 HTML · 内嵌笔触数据",
+      "pos": [
+        60,
+        510
+      ],
+      "size": [
+        220,
+        88
+      ]
+    },
+    {
+      "id": "video",
+      "type": "backend",
+      "label": "视频输出",
+      "sublabel": "Playwright / MediaRecorder / FFmpeg",
+      "pos": [
+        390,
+        510
+      ],
+      "size": [
+        220,
+        88
+      ]
+    },
+    {
+      "id": "files",
+      "type": "database",
+      "label": "作品文件与可编辑工程",
+      "sublabel": "PNG / JSON / HTML / MP4 / ZIP",
+      "pos": [
+        720,
+        510
+      ],
+      "size": [
+        220,
+        88
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "LOCAL RUNTIME / 本机运行 · 127.0.0.1:8765",
+      "wraps": [
+        "ui",
+        "api",
+        "worker",
+        "renderer",
+        "sqlite",
+        "engine",
+        "html",
+        "video",
+        "files"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "from": "ui",
+      "to": "api",
+      "label": "REST / 状态轮询",
+      "variant": "emphasis",
+      "labelDy": -10
+    },
+    {
+      "from": "api",
+      "to": "worker",
+      "label": "提交任务",
+      "variant": "dashed",
+      "labelDy": -10
+    },
+    {
+      "from": "worker",
+      "to": "engine",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "variant": "emphasis"
+    },
+    {
+      "from": "api",
+      "to": "sqlite",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "label": "元数据",
+      "labelDx": 35,
+      "labelAt": [
+        540,
+        244
+      ]
+    },
+    {
+      "from": "ui",
+      "to": "renderer",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "label": "作品数据",
+      "labelDx": 35,
+      "variant": "emphasis",
+      "labelAt": [
+        200,
+        244
+      ]
+    },
+    {
+      "from": "engine",
+      "to": "files",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "label": "笔触 / 预览",
+      "labelDx": 45,
+      "variant": "emphasis",
+      "labelAt": [
+        875,
+        454
+      ]
+    },
+    {
+      "from": "renderer",
+      "to": "html",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "variant": "emphasis"
+    },
+    {
+      "from": "renderer",
+      "to": "video",
+      "fromSide": "right",
+      "toSide": "left",
+      "via": [
+        [
+          325,
+          344
+        ],
+        [
+          325,
+          554
+        ]
+      ],
+      "variant": "emphasis"
+    },
+    {
+      "from": "video",
+      "to": "files",
+      "label": "编码文件",
+      "labelDy": -10
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "前端与渲染",
+      "items": [
+        "React / TypeScript / Vite",
+        "共享 Canvas 渲染确定性笔触",
+        "浏览器或可选 pywebview 桌面窗口"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "本地计算",
+      "items": [
+        "CPU 完整承担笔触生成与时序",
+        "CuPy 仅可选加速结构分析",
+        "生成用进程池，视频导出用线程池"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "数据与交付",
+      "items": [
+        "SQLite 元数据和按作品编号存储的文件",
+        "ZIP 工程携带清单、原图与完整笔触",
+        "HTML 离线播放，MP4 用于视频传播"
+      ]
+    }
+  ]
+}

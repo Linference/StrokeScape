@@ -1,0 +1,62 @@
+{
+  "sourceSha256": "3ea478022ce3f943a57187dd9ea375426b5d081570fb152892b7d0b39acf38ba",
+  "settings": {
+    "preset": "sketch",
+    "brush": "classic",
+    "duration": 30,
+    "device": "cpu",
+    "seed": 42,
+    "budget": 500000,
+    "maxEdge": 512,
+    "brushScale": 1,
+    "opacityScale": 1,
+    "texture": 1,
+    "gaps": 1,
+    "adaptiveStop": false,
+    "stopThreshold": 0.03,
+    "naturalOrder": true
+  },
+  "metricSource": "OpenCV feedback, approximate; not final Canvas or perceptual quality",
+  "results": [
+    {
+      "requested": 20000,
+      "actual": 20000,
+      "width": 288,
+      "height": 512,
+      "seconds": 2.21,
+      "mae": 17.7691,
+      "psnr": 19.6413,
+      "meanJump": 24.1394
+    },
+    {
+      "requested": 60000,
+      "actual": 60000,
+      "width": 288,
+      "height": 512,
+      "seconds": 10.28,
+      "mae": 15.1561,
+      "psnr": 20.768,
+      "meanJump": 24.4511
+    },
+    {
+      "requested": 150000,
+      "actual": 150000,
+      "width": 288,
+      "height": 512,
+      "seconds": 22.64,
+      "mae": 14.2633,
+      "psnr": 20.8929,
+      "meanJump": 24.9899
+    },
+    {
+      "requested": 500000,
+      "actual": 500000,
+      "width": 288,
+      "height": 512,
+      "seconds": 63.93,
+      "mae": 13.4744,
+      "psnr": 21.0028,
+      "meanJump": 25.4477
+    }
+  ]
+}
