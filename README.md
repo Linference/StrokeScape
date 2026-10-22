@@ -2,6 +2,30 @@
 
 让静态图片一笔一画，渐成其境。上传图片，系统分析颜色、轮廓与结构，生成从铺底、塑形到勾线、细节的绘画动画，支持交互预览及 HTML / MP4 导出。日常创作在本机完成，无需云端服务。
 
+[下载 Windows 便携版](https://github.com/Linference/StrokeScape/releases/tag/v0.1.0) · [观看绘画演示 MP4](https://github.com/Linference/StrokeScape/raw/refs/heads/main/docs/media/drawing-demo.mp4) · [开发者启动](#启动)
+
+## 看看效果
+
+### 工作台
+
+![绘序成境工作台：自定义笔触数量、画布预览与逐笔播放时间轴](docs/media/studio.png)
+
+上图为当前源码版界面：支持直接输入自定义笔触数量、恢复预设，以及逐笔播放、回退和时间轴跳转。截图中的作品使用 12,345 笔、90 秒动画时长。
+
+### 从空白画布到完整作品
+
+[![绘序成境绘画过程动图：铺底、塑形、勾线到细节](docs/media/drawing-demo.gif)](https://github.com/Linference/StrokeScape/raw/refs/heads/main/docs/media/drawing-demo.mp4)
+
+点击动图可打开或下载 **MP4 演示视频**。此示例由软件实际导出，使用 18,000 笔、960 × 730 画布，动画约 15 秒；动图为视频的缩小预览，不是生成耗时展示。
+
+### 原图与笔触重构
+
+| 原始示例图 | 笔触重构结果 |
+| :---: | :---: |
+| ![内置原创示例山间来信](docs/media/sample-source.png) | ![18,000 笔重构的视频末帧](docs/media/sample-painted.png) |
+
+展示素材均来自内置原创示例“山间来信”。界面截图与视频分别展示不同参数的任务，详情见[素材说明](docs/media/README.md)。当前下载包仍为 v0.1.0，尚未包含源码版最新界面与实时录制更新。
+
 ## 直接使用（Windows）
 
 前往 [v0.1.0 下载页](https://github.com/Linference/StrokeScape/releases/tag/v0.1.0)，下载 **StrokeScape-0.1.0-Windows-x64.zip**。
