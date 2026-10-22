@@ -1,0 +1,14 @@
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+python-multipart>=0.0.18
+numpy>=1.24,<3
+opencv-python-headless>=4.8,<5
+Pillow>=10,<13
+scipy>=1.11,<2
+playwright>=1.49,<2
+pywebview>=5,<7
+pytest>=8,<10
+httpx>=0.27,<1
+
+# Optional NVIDIA acceleration: install the CuPy wheel matching your CUDA runtime.
+# cupy-cuda12x

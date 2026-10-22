@@ -1,0 +1,8 @@
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+python-multipart>=0.0.18
+numpy>=2,<3
+opencv-python-headless>=4.10,<5
+Pillow>=10,<13
+playwright>=1.49,<2
+pywebview>=6,<7
