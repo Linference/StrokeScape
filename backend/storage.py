@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +21,10 @@ def init():
             settings TEXT NOT NULL, stats TEXT, error TEXT,
             export_state TEXT DEFAULT '{}'
         )""")
+        columns = {row['name'] for row in db.execute('PRAGMA table_info(tasks)')}
+        for name, declaration in [('tags', "TEXT DEFAULT '[]'"), ('deleted_at', 'TEXT')]:
+            if name not in columns:
+                db.execute(f'ALTER TABLE tasks ADD COLUMN {name} {declaration}')
         db.execute("UPDATE tasks SET status='interrupted', stage='上次任务被中断，可重新生成' WHERE status IN ('queued','running','cancelling')")
         rows = db.execute("SELECT id, export_state FROM tasks").fetchall()
         for row in rows:
@@ -50,10 +55,10 @@ def create(task_id: str, title: str, settings: dict):
 
 
 def update(task_id: str, **fields):
-    allowed = {"status", "progress", "stage", "stats", "error", "export_state", "title"}
+    allowed = {"status", "progress", "stage", "stats", "error", "export_state", "title", "tags", "deleted_at"}
     if not fields or not set(fields) <= allowed:
         raise ValueError("无效字段")
-    fields = {key: json.dumps(value, ensure_ascii=False) if isinstance(value, dict) else value for key, value in fields.items()}
+    fields = {key: json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else value for key, value in fields.items()}
     with connect() as db:
         db.execute("UPDATE tasks SET " + ",".join(f"{key}=?" for key in fields) + " WHERE id=?",
                    [*fields.values(), task_id])
@@ -63,7 +68,7 @@ def decode(row):
     if row is None:
         return None
     result = dict(row)
-    for key in ("settings", "stats", "export_state"):
+    for key in ("settings", "stats", "export_state", "tags"):
         result[key] = json.loads(result[key]) if result[key] else None
     return result
 
@@ -73,6 +78,35 @@ def get(task_id: str):
         return decode(db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone())
 
 
-def all_tasks():
+def all_tasks(trash=False):
     with connect() as db:
-        return [decode(row) for row in db.execute("SELECT * FROM tasks ORDER BY created_at DESC LIMIT 100")]
+        condition = 'IS NOT NULL' if trash else 'IS NULL'
+        return [decode(row) for row in db.execute(f"SELECT * FROM tasks WHERE deleted_at {condition} ORDER BY created_at DESC LIMIT 1000")]
+
+
+def trash_task(task_id: str):
+    update(task_id, deleted_at=datetime.now(timezone.utc).isoformat())
+
+
+def restore_task(task_id: str):
+    update(task_id, deleted_at=None)
+
+
+def delete_task(task_id: str):
+    """Remove one validated app-owned directory and its metadata."""
+    directory = task_dir(task_id)
+    root = DATA.resolve()
+    target = directory.resolve()
+    # Validate resolved absolute paths before any recursive removal on Windows.
+    # Never follow a task symlink/junction to another task or external folder.
+    if directory.is_symlink() or target.parent != root or target.name != task_id:
+        raise ValueError('作品目录异常，无法删除')
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        if db.execute('SELECT id FROM tasks WHERE id=?', (task_id,)).fetchone() is None:
+            raise KeyError(task_id)
+        if target.exists():
+            if not target.is_dir():
+                raise ValueError('作品目录异常，无法删除')
+            shutil.rmtree(target)
+        db.execute('DELETE FROM tasks WHERE id=?', (task_id,))

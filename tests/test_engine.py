@@ -54,10 +54,12 @@ def test_auto_without_cuda_keeps_cpu_functional(image_path):
     assert result['stats']['fallback'] == 'not installed'
 
 
-def test_large_budget_schedule_stays_positive_serial_and_exact():
-    strokes = [{'p': [1, 1, 1.01 + index % 7, 2], 'l': min(3, index // 50000)} for index in range(200000)]
+@pytest.mark.parametrize('budget', [200000, 500000])
+def test_large_budget_schedule_stays_positive_serial_and_exact(budget):
+    per_layer = budget // 4
+    strokes = [{'p': [1, 1, 1.01 + index % 7, 2], 'l': min(3, index // per_layer)} for index in range(budget)]
     counts = schedule(strokes, 15000)
-    assert counts == [50000] * 4
+    assert counts == [per_layer] * 4
     assert all(stroke['dt'] > 0 for stroke in strokes)
     assert strokes[-1]['s'] + strokes[-1]['dt'] == pytest.approx(15000, abs=1e-6)
     for previous, current in zip(strokes, strokes[1:]):

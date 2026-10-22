@@ -5,11 +5,16 @@ import {
   FileImage, FolderOpen, Gauge, ImagePlus, Layers3, Leaf, LoaderCircle, Maximize2,
   Monitor, Mountain, Palette, Pause, Play, Plus, RefreshCw, RotateCcw,
   Settings2, ShieldCheck, SkipBack, SkipForward, SlidersHorizontal, Sparkles,
-  Upload, Video, WandSparkles, Waves, Workflow, X, Zap, Sun, Moon, Search, PanelLeftClose, PanelLeftOpen,
+  Upload, Video, WandSparkles, Waves, Workflow, X, Zap, Sun, Moon, Search, PanelLeftClose, PanelLeftOpen, Trash2, ScanLine,
 } from 'lucide-react';
 import { api, jsonPost } from './api';
 import Principle from './Principle';
-import type { Device, Hardware, Preset, Renderer, Settings, Task, Work } from './types';
+import CanvasViewport from './CanvasViewport';
+import type { CanvasView } from './CanvasViewport';
+import BrushPicker, { BRUSHES } from './BrushPicker';
+import { BrushControls, RefineTools, QualitySummary } from './CreativeTools';
+import WorkLibrary from './WorkLibrary';
+import type { Device, Hardware, Preset, Renderer, Settings, Task, Work, Region } from './types';
 
 type Page = 'studio' | 'library' | 'hardware';
 const PRESETS: { id: Preset; name: string; count: number; hint: string; maxEdge: number; duration: number }[] = [
@@ -24,6 +29,7 @@ const LAYERS = [
   { name: '细节', en: 'DETAIL', desc: '一笔一画，渐入佳境', color: '#e4d4ae', icon: Sparkles },
 ];
 const busy = (task: Task | null) => !!task && ['queued', 'running', 'cancelling'].includes(task.status);
+const deleteBlockReason = (task: Task | null) => busy(task) ? '请先取消生成，等待任务停止后删除' : ['queued', 'running'].includes(task?.export_state?.status || '') ? '请先取消视频导出，等待任务停止后删除' : '';
 const formatTime = (ms: number) => {
   const seconds = Math.floor((ms + 0.5) / 1000);
   return `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}`;
@@ -35,7 +41,7 @@ function loadRenderer() {
   if (window.StrokeRenderer) return Promise.resolve();
   if (!rendererLoading) rendererLoading = new Promise<void>((resolve, reject) => {
     const script = document.createElement('script');
-    script.src = '/renderer.js'; script.onload = () => resolve(); script.onerror = () => { rendererLoading = undefined; reject(new Error('绘画引擎加载失败')); };
+    script.src = '/renderer.js?v=creative-tools-v2'; script.onload = () => resolve(); script.onerror = () => { rendererLoading = undefined; reject(new Error('绘画引擎加载失败')); };
     document.head.appendChild(script);
   });
   return rendererLoading;
@@ -43,9 +49,8 @@ function loadRenderer() {
 
 export default function App() {
   const [page, setPage] = useState<Page>('studio');
-  const [inspectorTab, setInspectorTab] = useState<'settings' | 'layers'>('settings');
+  const [inspectorTab, setInspectorTab] = useState<'settings' | 'layers' | 'refine'>('settings');
   const [focusMode, setFocusMode] = useState(false);
-  const [libraryQuery, setLibraryQuery] = useState('');
   const [theme, setTheme] = useState<'light' | 'dark'>(() => localStorage.getItem('huixu.theme') === 'dark' ? 'dark' : 'light');
   const [hardware, setHardware] = useState<Hardware | null>(null);
   const [hardwareError, setHardwareError] = useState('');
@@ -53,14 +58,14 @@ export default function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [activeId, setActiveId] = useState<string | null>(() => localStorage.getItem('huixu.active'));
   const [work, setWork] = useState<Work | null>(null);
-  const [settings, setSettings] = useState<Settings>({ preset: 'standard', duration: 180, device: 'auto', seed: 42 });
+  const [settings, setSettings] = useState<Settings>({ preset: 'standard', duration: 180, device: 'auto', seed: 42, naturalOrder: true, adaptiveStop: false });
   const [file, setFile] = useState<File | null>(null);
   const [localPreview, setLocalPreview] = useState<string | null>(null);
   const [title, setTitle] = useState('山间来信');
   const [submitting, setSubmitting] = useState(false);
   const [notice, setNotice] = useState<{ text: string; error?: boolean } | null>(null);
   const [connected, setConnected] = useState(true);
-  const [view, setView] = useState<'painting' | 'source'>('painting');
+  const [view, setView] = useState<CanvasView>('painting');
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
   const [speed, setSpeed] = useState(1);
@@ -68,7 +73,13 @@ export default function App() {
   const [currentLayer, setCurrentLayer] = useState(0);
   const [showCursor, setShowCursor] = useState(true);
   const [dragging, setDragging] = useState(false);
-  const [modal, setModal] = useState<'export' | 'help' | 'principle' | null>(null);
+  const [modal, setModal] = useState<'export' | 'help' | 'principle' | 'delete' | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Task | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [selection, setSelection] = useState<Region | null>(null);
+  const [selecting, setSelecting] = useState(false);
+  const [refineBudget, setRefineBudget] = useState(5000);
+  const [refining, setRefining] = useState(false);
   const [motion, setMotion] = useState(() => localStorage.getItem('huixu.motion') !== 'off');
   const [fps, setFps] = useState<24 | 30 | 60>(30);
   const [hardwareEncode, setHardwareEncode] = useState(true);
@@ -82,12 +93,13 @@ export default function App() {
   const playingRef = useRef(false);
   const workIdRef = useRef<string | null>(null);
   const historyLoadedRef = useRef(false);
+  const deletedIdsRef = useRef(new Set<string>());
   const shellRef = useRef<HTMLDivElement>(null);
   const active = tasks.find(task => task.id === activeId) || null;
-  const visibleTasks = tasks.filter(task => task.title.toLocaleLowerCase().includes(libraryQuery.trim().toLocaleLowerCase()));
+  const deletionTask = tasks.find(task => task.id === deleteTarget?.id) || deleteTarget;
   const preset = PRESETS.find(p => p.id === settings.preset)!;
   const targetBudget = settings.budget ?? preset.count;
-  const budgetValid = Number.isInteger(targetBudget) && targetBudget >= 200 && targetBudget <= 200000;
+  const budgetValid = Number.isInteger(targetBudget) && targetBudget >= 200 && targetBudget <= 500000;
   const estimatedLayers = [0.08, 0.2, 0.12].map(ratio => Math.round(Math.min(targetBudget, 30000) * ratio));
   estimatedLayers.push(targetBudget - estimatedLayers.reduce((sum, count) => sum + count, 0));
   const source = localPreview || (activeId ? `/api/tasks/${activeId}/source` : '/api/sample');
@@ -120,7 +132,7 @@ export default function App() {
 
   const refreshTasks = useCallback(async () => {
     try {
-      const result = await api<Task[]>('/tasks');
+      const result = (await api<Task[]>('/tasks')).filter(task => !deletedIdsRef.current.has(task.id));
       setTasks(result); setConnected(true);
       if (!historyLoadedRef.current) {
         setActiveId(current => current && !result.some(task => task.id === current) ? null : current);
@@ -189,7 +201,7 @@ export default function App() {
     const selector = 'button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),[tabindex="0"]';
     dialog?.querySelector<HTMLElement>(selector)?.focus();
     const trap = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { setModal(null); return; }
+      if (event.key === 'Escape') { if (!deleting) setModal(null); return; }
       if (event.key !== 'Tab' || !dialog) return;
       const nodes = Array.from(dialog.querySelectorAll<HTMLElement>(selector));
       const first = nodes[0], last = nodes[nodes.length - 1];
@@ -198,18 +210,18 @@ export default function App() {
     };
     document.addEventListener('keydown', trap);
     return () => { document.removeEventListener('keydown', trap); previous?.focus(); };
-  }, [modal]);
+  }, [modal, deleting]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (event.code !== 'Space' || !work || page !== 'studio' || modal || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes((event.target as HTMLElement).tagName)) return;
       event.preventDefault(); togglePlay();
     };
     window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
-  }, [work, page, modal]);
+  }, [work, page, modal, view]);
 
   function reset() {
     setPlaying(false); setActiveId(null); setWork(null); workIdRef.current = null; setFile(null); setLocalPreview(null);
-    setTitle('山间来信'); setTime(0); setCurrentStroke(0); setCurrentLayer(0); setPage('studio'); setView('painting');
+    setSelection(null); setSelecting(false); setInspectorTab('settings'); setTitle('山间来信'); setTime(0); setCurrentStroke(0); setCurrentLayer(0); setPage('studio'); setView('painting');
   }
   function selectFile(next: File) {
     if (!/\.(png|jpe?g|webp|bmp|tiff?)$/i.test(next.name) && !next.type.startsWith('image/')) { notify('请选择 PNG、JPEG 或 WebP 图片', true); return; }
@@ -217,13 +229,44 @@ export default function App() {
     reset(); setFile(next); setTitle(next.name.replace(/\.[^.]+$/, '')); setLocalPreview(URL.createObjectURL(next));
   }
   function openTask(task: Task) {
+    setSelection(null); setSelecting(false); setInspectorTab('settings');
     setPlaying(false); setWork(null); workIdRef.current = null; setLocalPreview(null); setFile(null);
     setTime(0); setActiveId(task.id); setSettings(task.settings); setTitle(task.title); setView('painting'); setPage('studio');
+  }
+  function requestDelete(task: Task) {
+    const reason = deleteBlockReason(task);
+    if (reason) { notify(reason, true); return; }
+    setDeleteTarget(task); setModal('delete');
+  }
+  async function deleteWork() {
+    if (!deletionTask || deleting || deleteBlockReason(deletionTask)) return;
+    const id = deletionTask.id;
+    setDeleting(true);
+    try {
+      await api<{ deleted: boolean }>(`/tasks/${id}${deletionTask.deleted_at ? '/permanent' : ''}`, { method: 'DELETE' });
+      deletedIdsRef.current.add(id);
+      setTasks(previous => previous.filter(task => task.id !== id));
+      if (activeId === id) { reset(); setPage('library'); }
+      setModal(null); setDeleteTarget(null);
+      notify(deletionTask.deleted_at ? '作品及应用内文件已彻底删除' : '作品已移入回收站，可在作品集中恢复');
+      void refreshTasks();
+    } catch (error) { notify((error as Error).message, true); }
+    finally { setDeleting(false); }
+  }
+  async function refine() {
+    if (!activeId || !work || !selection || refining) return;
+    setRefining(true);
+    try {
+      const task = await api<Task>(`/tasks/${activeId}/refine`, jsonPost({ region: selection, budget: refineBudget, settings }));
+      setTasks(previous => [task, ...previous]); openTask(task);
+      notify('精修已开始，原作品保留在作品集');
+    } catch (error) { notify((error as Error).message, true); }
+    finally { setRefining(false); }
   }
   async function generate() {
     if (submitting || busy(active)) return;
     if (!budgetValid) {
-      notify('笔触预算请输入 200 到 200,000 之间的整数', true); return;
+      notify('笔触预算请输入 200 到 500,000 之间的整数', true); return;
     }
     setSubmitting(true); setPlaying(false);
     try {
@@ -242,12 +285,13 @@ export default function App() {
   function togglePlay() {
     if (!work) return;
     if (timeRef.current >= work.durationMs) { timeRef.current = 0; setTime(0); }
-    setView('painting'); setPlaying(previous => !previous);
+    if (view === 'source') setView('painting');
+    setPlaying(previous => !previous);
   }
   function seek(next: number) { setTime(Math.max(0, Math.min(duration, next))); }
   function step(forward: boolean) {
     if (!work) return;
-    setPlaying(false); setView('painting');
+    setPlaying(false); if (view === 'source') setView('painting');
     if (forward) {
       const next = work.strokes.find(s => s.s + s.dt > time + 0.001);
       if (next) seek(next.s + next.dt);
@@ -280,7 +324,7 @@ export default function App() {
   function jumpLayer(layer: number) {
     if (!work) return;
     const stroke = work.strokes.find(s => s.l === layer);
-    if (stroke) { setPlaying(false); setView('painting'); seek(stroke.s); }
+    if (stroke) { setPlaying(false); if (view === 'source') setView('painting'); seek(stroke.s); }
   }
 
   return <div className={`app-shell page-${page} ${motion ? 'motion-on' : 'motion-off'}`} ref={shellRef}>
@@ -307,7 +351,7 @@ export default function App() {
             <h1>{page === 'studio' ? '一张图片，一段绘画。' : page === 'library' ? '你的灵感收藏室' : '让创作，顺畅发生。'}</h1>
             <p>{page === 'studio' ? '从静止的瞬间，到一笔一画的过程。' : page === 'library' ? '回到每一幅作品，继续探索它的绘画过程。' : '了解这台电脑的图像计算与视频导出能力。'}</p>
           </div>
-          <div className="heading-actions"><button className="button secondary" onClick={reset}><Plus size={17} />新建作品</button><button className="button primary" disabled={!work || busy(active)} onClick={() => setModal('export')}><ArrowDownToLine size={17} />导出作品<ChevronDown size={14} /></button></div>
+          <div className="heading-actions"><button className="button secondary" onClick={reset}><Plus size={17} />新建作品</button>{page === 'studio' && active && <button className="button secondary delete-current-button" aria-label="删除当前作品" title={deleteBlockReason(active) || '删除当前作品'} disabled={!!deleteBlockReason(active)} onClick={() => requestDelete(active)}><Trash2 size={16} />删除</button>}<button className="button primary" disabled={!work || busy(active)} onClick={() => setModal('export')}><ArrowDownToLine size={17} />导出作品<ChevronDown size={14} /></button></div>
         </section>
 
         {!connected && <div className="connection-banner"><Monitor size={17} />本地服务连接已断开。请确认启动窗口仍在运行，恢复后会自动重新连接。</div>}
@@ -319,7 +363,7 @@ export default function App() {
         </section>}
 
         {page === 'studio' && <div className={`workspace-grid inspector-${inspectorTab} ${focusMode ? 'focus-mode' : ''}`}>
-          <div className="inspector-tabs" role="tablist" aria-label="创作面板"><button id="settings-tab" role="tab" aria-selected={inspectorTab === 'settings'} aria-controls="settings-panel" onClick={() => setInspectorTab('settings')}><SlidersHorizontal size={15} />创作设置</button><button id="layers-tab" role="tab" aria-selected={inspectorTab === 'layers'} aria-controls="layers-panel" onClick={() => setInspectorTab('layers')}><Layers3 size={15} />绘制图层</button></div>
+          <div className="inspector-tabs" role="tablist" aria-label="创作面板"><button id="settings-tab" role="tab" aria-selected={inspectorTab === 'settings'} aria-controls="settings-panel" onClick={() => { setInspectorTab('settings'); setSelecting(false); }}><SlidersHorizontal size={15} />创作设置</button><button id="layers-tab" role="tab" aria-selected={inspectorTab === 'layers'} aria-controls="layers-panel" onClick={() => { setInspectorTab('layers'); setSelecting(false); }}><Layers3 size={15} />绘制图层</button><button id="refine-tab" role="tab" aria-selected={inspectorTab === 'refine'} aria-controls="refine-panel" disabled={!work} onClick={()=>setInspectorTab('refine')}><ScanLine size={14}/>局部精修</button></div>
           <section className="settings-panel panel" id="settings-panel" role="tabpanel" aria-labelledby="settings-tab" hidden={inspectorTab !== 'settings'}>
             <div className="panel-title"><SlidersHorizontal size={16} /><h2>创作设置</h2><span>01</span></div>
             <div className="settings-body">
@@ -333,6 +377,11 @@ export default function App() {
               <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp,image/bmp,image/tiff" hidden onChange={event => { if (event.target.files?.[0]) selectFile(event.target.files[0]); event.target.value = ''; }} />
               <div className="file-formats">PNG / JPG / WEBP <span>≤ 24 MB</span></div>
 
+              <BrushPicker value={settings.brush || 'classic'} load={loadRenderer}
+                onChange={brush => setSettings(previous => ({ ...previous, brush }))}
+                pending={!!work && (settings.brush || 'classic') !== (work.settings.brush || 'classic')} />
+              <BrushControls settings={settings} onChange={setSettings} />
+
               <div className="section-label preset-label"><span>绘制精度</span><span className="muted">笔触预算</span></div>
               <div className="preset-options" role="radiogroup" aria-label="绘制精度">
                 {PRESETS.map((item, index) => <button key={item.id} role="radio" aria-checked={settings.preset === item.id} className={`preset-option ${settings.preset === item.id ? 'selected' : ''}`} onClick={() => setSettings(previous => ({ ...previous, preset: item.id, budget: undefined, maxEdge: undefined, duration: item.duration }))}>
@@ -342,9 +391,9 @@ export default function App() {
 
               <div className="stroke-budget">
                 <div className="section-label"><label htmlFor="stroke-budget">自定义笔触数量</label><span className="budget-mode">{settings.budget === undefined ? '跟随预设' : '已自定义'}</span></div>
-                <div className="budget-input-wrap"><input id="stroke-budget" type="number" inputMode="numeric" min={200} max={200000} step={1} placeholder={String(preset.count)} value={settings.budget ?? ''} aria-invalid={!budgetValid} aria-describedby="stroke-budget-hint" onChange={event => setSettings(previous => ({ ...previous, budget: event.target.value === '' ? undefined : Number(event.target.value) }))} /><span>笔</span></div>
+                <div className="budget-input-wrap"><input id="stroke-budget" type="number" inputMode="numeric" min={200} max={500000} step={1} placeholder={String(preset.count)} value={settings.budget ?? ''} aria-invalid={!budgetValid} aria-describedby="stroke-budget-hint" onChange={event => setSettings(previous => ({ ...previous, budget: event.target.value === '' ? undefined : Number(event.target.value) }))} /><span>笔</span></div>
                 <div className="budget-current"><span>本次目标 <strong>{targetBudget.toLocaleString()}</strong> 笔</span>{settings.budget !== undefined && <button className="text-button" onClick={() => setSettings(previous => ({ ...previous, budget: undefined }))}>恢复预设</button>}</div>
-                <p id="stroke-budget-hint" className={budgetValid ? 'budget-hint' : 'budget-hint budget-error'}>{budgetValid ? '支持 200–200,000 笔，留空使用预设。' : '请输入 200 到 200,000 之间的整数。'}</p>
+                <p id="stroke-budget-hint" className={budgetValid ? 'budget-hint' : 'budget-hint budget-error'}>{budgetValid ? '支持 200–500,000 笔，留空使用预设。' : '请输入 200 到 500,000 之间的整数。'}</p>
               </div>
 
               <div className="section-label duration-label"><span>动画时长</span><strong>{settings.duration}<small> 秒</small></strong></div>
@@ -364,20 +413,22 @@ export default function App() {
 
           <section className="canvas-column">
             <div className={`canvas-panel panel ${playing ? 'is-playing' : ''} ${busy(active) ? 'is-generating' : ''}`}>
-              <div className="canvas-toolbar"><button className="icon-button inspector-toggle" aria-label={focusMode ? '展开设置面板' : '收起设置面板'} aria-pressed={focusMode} title={focusMode ? '展开设置面板' : '收起设置面板'} onClick={() => setFocusMode(value => !value)}>{focusMode ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button><div className="canvas-document"><span className="document-dot" /><span>{title}</span><small>{work ? '已生成' : busy(active) ? '生成中' : '待绘制'}</small></div><div className="canvas-tools"><div className="segmented view-toggle"><button className={view === 'painting' ? 'selected' : ''} onClick={() => setView('painting')}>绘画</button><button className={view === 'source' ? 'selected' : ''} onClick={() => setView('source')}>原图</button></div><span className="tool-separator" /><button className="icon-button" aria-label="全屏查看画布" onClick={() => { if (!document.fullscreenElement) void stageRef.current?.requestFullscreen().catch(() => notify('当前窗口不支持全屏查看')); else void document.exitFullscreen(); }}><Maximize2 size={15} /></button></div></div>
+              <div className="canvas-toolbar"><button className="icon-button inspector-toggle" aria-label={focusMode ? '展开设置面板' : '收起设置面板'} aria-pressed={focusMode} title={focusMode ? '展开设置面板' : '收起设置面板'} onClick={() => setFocusMode(value => !value)}>{focusMode ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button><div className="canvas-document"><span className="document-dot" /><span>{title}</span><small>{work ? BRUSHES.find(brush => brush.id === (work.settings.brush || 'classic'))?.name : busy(active) ? '生成中' : '待绘制'}</small></div><div className="canvas-tools"><div className="segmented view-toggle"><button className={view === 'painting' ? 'selected' : ''} onClick={() => setView('painting')}>绘画</button><button className={view === 'source' ? 'selected' : ''} onClick={() => setView('source')}>原图</button><button className={view === 'compare' ? 'selected' : ''} disabled={!work} aria-pressed={view === 'compare'} onClick={() => setView('compare')}>对比</button></div><span className="tool-separator" /><button className="icon-button" aria-label="全屏查看画布" onClick={() => { if (!document.fullscreenElement) void stageRef.current?.requestFullscreen().catch(() => notify('当前窗口不支持全屏查看')); else void document.exitFullscreen(); }}><Maximize2 size={15} /></button></div></div>
               <div className={`canvas-stage ${dragging ? 'dragging' : ''}`} ref={stageRef}
                 onDragOver={event => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={event => { event.preventDefault(); setDragging(false); if (event.dataTransfer.files[0]) selectFile(event.dataTransfer.files[0]); }}>
 
                 <div className="stage-exhibit-label"><span>CANVAS</span><span>{work ? `${work.width} × ${work.height}` : '自由创作，从这里开始'}</span></div>
 
-                <div className="artwork-frame"><img className={`source-artwork ${work && view === 'painting' ? 'hidden' : ''}`} src={source} alt={`${title} 原图`} /><canvas ref={canvasRef} className={!work || view === 'source' ? 'hidden' : ''} /></div>
+                <CanvasViewport source={source} title={title} width={work?.width} height={work?.height} view={view} canvasRef={canvasRef} preview={busy(active) && activeId ? `/api/tasks/${activeId}/preview?v=${active?.progress}` : undefined} selecting={selecting} selection={selection} onSelection={setSelection} />
                 {!work && !busy(active) && <div className="sample-tag"><span className="mini-dot" />{active?.status === 'failed' ? '生成未完成' : localPreview || activeId ? '原图预览' : '内置原创示例 · 山间来信'}</div>}
-                {busy(active) && <div className="generation-overlay"><div className="generation-card"><span className="generation-brush"><Brush size={26} /></span><h3>正在构建绘画过程</h3><p>{active?.stage}</p><div className="progress-track"><span style={{ width: `${Math.max(2, (active?.progress || 0) * 100)}%` }} /></div><div className="generation-progress"><span>{active?.status === 'queued' ? '排队中' : '正在生成笔触'}</span><strong>{Math.round((active?.progress || 0) * 100)}%</strong></div></div></div>}
+
                 {active && ['failed', 'cancelled', 'interrupted'].includes(active.status) && <div className="stage-error"><CircleHelp size={15} /><span>{active.error || active.stage}</span></div>}
                 <div className="stage-watermark"><Feather size={12} />绘序成境</div>
               </div>
               <div className="canvas-status"><span><span className="mini-dot" />{work ? playing ? '正在逐笔绘制' : time >= duration ? '作品已完成' : '画布已就绪' : busy(active) ? '正在准备绘画过程' : '一张图片，无限可能'}</span>{work && <span className="live-stroke-count">{currentStroke.toLocaleString()}<small> / {work.strokes.length.toLocaleString()} 笔</small></span>}<span>{work ? `${work.width} × ${work.height}` : '自适应画布'}</span></div>
             </div>
+
+            {busy(active) && <div className="generation-live panel" role="status"><span className="generation-live-label"><LoaderCircle size={16} className="spin"/>生成中预览 · 近似渲染</span><span>{active?.stage}</span><div className="progress-track"><span style={{width:`${Math.max(2,(active?.progress||0)*100)}%`}}/></div><strong>{Math.round((active?.progress||0)*100)}%</strong></div>}
 
             <div className="player-panel panel">
               <div className="player-top"><div className="player-controls"><button className="icon-button" disabled={!work} aria-label="从头重播" onClick={() => { setPlaying(false); seek(0); }}><RotateCcw size={17} /></button><button className="icon-button" disabled={!work} aria-label="上一笔" onClick={() => step(false)}><SkipBack size={17} /></button><button className="play-button" disabled={!work} aria-label={playing ? '暂停播放' : '播放绘画'} onClick={togglePlay}>{playing ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}</button><button className="icon-button" disabled={!work} aria-label="下一笔" onClick={() => step(true)}><SkipForward size={17} /></button><div className="player-clock"><strong>{formatTime(time)}</strong><span>/ {formatTime(duration)}</span></div></div><div className="player-options"><button className={`cursor-toggle ${showCursor ? 'enabled' : ''}`} aria-pressed={showCursor} onClick={() => setShowCursor(value => !value)}><Feather size={13} /><span>笔尖</span></button><select aria-label="播放速度" value={speed} onChange={event => setSpeed(Number(event.target.value))}>{[0.25, 0.5, 1, 1.5, 2, 4].map(value => <option key={value} value={value}>{value}×</option>)}</select></div></div>
@@ -387,6 +438,10 @@ export default function App() {
             <div className="canvas-footnote"><span><ShieldCheck size={13} />离线创作，安心落笔</span><span>空格播放 / 暂停<span className="keyboard-key">␣</span></span></div>
           </section>
 
+          <aside className="refine-column" id="refine-panel" role="tabpanel" aria-labelledby="refine-tab" hidden={inspectorTab !== 'refine'}>
+            {work && !busy(active) && <RefineTools work={work} selection={selection} selecting={selecting} budget={refineBudget} busy={refining} onSelection={setSelection} onSelecting={value=>{setSelecting(value);setPlaying(false);if(value){setView('painting');seek(duration);if(!selection)setSelection([Math.floor(work.width*.25),Math.floor(work.height*.25),Math.floor(work.width*.5),Math.floor(work.height*.5)]);}}} onBudget={setRefineBudget} onRefine={()=>void refine()} />}
+          </aside>
+
           <aside className="details-column" id="layers-panel" role="tabpanel" aria-labelledby="layers-tab" hidden={inspectorTab !== 'layers'}>
             <section className="layers-panel panel"><div className="panel-title"><Layers3 size={16} /><h2>绘制图层</h2><span>04</span></div><p className="layers-intro">从整体到细节，让画面有序生长。</p><div className="layer-list">{LAYERS.map((layer, index) => {
               const Icon = layer.icon;
@@ -394,12 +449,12 @@ export default function App() {
               const complete = !!work && (currentLayer > index || time >= duration);
               return <button className={`layer-row ${work && currentLayer === index && time < duration ? 'current' : ''}`} key={layer.en} disabled={!work} onClick={() => jumpLayer(index)}><span className="layer-connector" /><span className="layer-icon" style={{ color: layer.color }}><Icon size={18} strokeWidth={1.5} /></span><span className="layer-text"><span className="layer-heading"><strong>{layer.name}</strong><small>{layer.en}</small>{complete && <CheckCircle2 size={12} />}</span><span className="layer-description">{layer.desc}</span><span className="layer-count">{layerCount.toLocaleString()} 笔 {!work && <small>预计</small>}</span></span><ChevronRight className="layer-arrow" size={13} /></button>;
             })}</div><div className="serial-note"><span className="mini-dot" />严格串行 · 每一笔都有自己的时间</div></section>
-            <section className="summary-panel panel"><div className="section-label"><span>作品概览</span><Gauge size={15} /></div><div className="summary-stats"><div><small>{work ? '实际笔触' : '目标笔触'}</small><strong>{(work?.stats.count ?? targetBudget).toLocaleString()}<span> 笔</span></strong></div><div><small>动画时长</small><strong>{Math.round(duration / 1000)}<span> 秒</span></strong></div></div><div className="summary-meta"><span>生成用时</span><strong>{work ? `${work.stats.computeSeconds} 秒` : '生成后显示'}</strong></div><div className="summary-meta"><span>计算后端</span><strong>{work ? work.stats.backend === 'cuda' ? 'CUDA + CPU' : 'CPU' : '自动检测'}</strong></div>{work?.stats.fallback && <p className="fallback-note">{work.stats.fallback}</p>}</section>
+            <section className="summary-panel panel"><div className="section-label"><span>作品概览</span><Gauge size={15} /></div><div className="summary-stats"><div><small>{work ? '实际笔触' : '目标笔触'}</small><strong>{(work?.stats.count ?? targetBudget).toLocaleString()}<span> 笔</span></strong></div><div><small>动画时长</small><strong>{Math.round(duration / 1000)}<span> 秒</span></strong></div></div><div className="summary-meta"><span>生成用时</span><strong>{work ? `${work.stats.computeSeconds} 秒` : '生成后显示'}</strong></div><div className="summary-meta"><span>计算后端</span><strong>{work ? work.stats.backend === 'cuda' ? 'CUDA + CPU' : 'CPU' : '自动检测'}</strong></div>{work?.stats.fallback && <p className="fallback-note">{work.stats.fallback}</p>}{work && <QualitySummary work={work} />}</section>
 
           </aside>
         </div>}
 
-        {page === 'library' && <section className="library-page"><div className="library-heading"><span>全部作品 <b>{tasks.length}</b></span><label className="library-search"><Search size={16} /><input type="search" placeholder="搜索作品名称" aria-label="搜索作品" value={libraryQuery} onChange={event => setLibraryQuery(event.target.value)} /></label><button className="text-button" onClick={() => void refreshTasks()}><RefreshCw size={14} />刷新</button></div>{visibleTasks.length ? <div className="library-grid">{visibleTasks.map(task => <button className="work-card panel" key={task.id} onClick={() => openTask(task)}><div className="work-thumbnail"><img src={`/api/tasks/${task.id}/source`} alt={task.title} /><span className={`task-status ${task.status}`}>{friendlyStatus(task.status)}</span>{busy(task) && <div className="card-progress"><span style={{ width: `${task.progress * 100}%` }} /></div>}</div><div className="work-card-info"><h3>{task.title}</h3><span>{task.stats ? `${task.stats.count.toLocaleString()} 笔` : task.stage}<span>·</span>{task.settings.duration} 秒</span><div><small>{new Date(task.created_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</small><ArrowUpRight size={16} /></div></div></button>)}</div> : <div className="empty-library panel"><FolderOpen size={44} strokeWidth={1} /><h2>{libraryQuery ? '没有找到匹配的作品' : '第一幅作品，从这里开始'}</h2><p>{libraryQuery ? '试试其他名称，或清空搜索查看全部作品。' : '导入一张图片，把灵感留在自己的收藏室。'}</p><button className="button primary" onClick={reset}><Plus size={17} />开始创作</button></div>}</section>}
+        {page === 'library' && <WorkLibrary tasks={tasks} onOpen={openTask} onDelete={requestDelete} onRefresh={()=>void refreshTasks()} onRestore={id=>{deletedIdsRef.current.delete(id);void refreshTasks();}} onImported={task=>{setTasks(previous=>[task,...previous]);openTask(task);}} onNew={reset} notify={notify} />}
 
         {page === 'hardware' && <section className="hardware-page"><div className="hardware-overview panel"><div className="hardware-title"><span className="hardware-symbol"><Cpu size={30} strokeWidth={1.3} /></span><div><h2>创作设备</h2><p>计算与编码分别检测，按实际能力启用加速。</p></div><button className="button secondary" disabled={detecting} onClick={() => void detectHardware(true)}><RefreshCw size={15} className={detecting ? 'spin' : ''} />{detecting ? '检测中…' : '重新检测'}</button></div>{hardwareError && <div className="error-message">{hardwareError}</div>}<div className="hardware-cards"><div><Cpu size={22} /><small>CPU 计算</small><strong>{hardware ? `${hardware.cpu} 个逻辑处理器` : '正在检测'}</strong><span>图像处理、笔触生成与时序编排</span><b className="capability-badge available"><Check size={12} />完整支持</b></div><div><Zap size={22} /><small>GPU 图像计算</small><strong>{hardware?.cuda.available ? hardware.cuda.name : '使用 CPU 后端'}</strong><span>{hardware?.cuda.available ? `可用显存 ${hardware.cuda.freeMb?.toLocaleString()} MB · 加速结构分析` : hardware?.cuda.reason || '正在进行计算自检'}</span><b className={`capability-badge ${hardware?.cuda.available ? 'available' : ''}`}>{hardware?.cuda.available ? 'CUDA 可用' : '可选加速'}</b></div><div><Video size={22} /><small>视频编码</small><strong>{hardware?.preferredEncoder || (detecting ? '正在试编码' : '未检测到编码器')}</strong><span>{hardware?.encoders.length ? hardware.encoders.join(' / ') : '需要可用的 FFmpeg 编码器'}</span><b className={`capability-badge ${hardware?.encoders.length ? 'available' : ''}`}>{hardware?.encoders.length ? '已通过试编码' : '等待配置'}</b></div></div></div><div className="hardware-lower"><section className="panel adapter-panel"><h3><Monitor size={17} />已识别的显示设备</h3>{hardware?.adapters.length ? hardware.adapters.map((adapter, index) => <div className="adapter-row" key={index}><span className="adapter-icon"><Monitor size={20} /></span><div><strong>{adapter.name}</strong><small>{adapter.memoryMb ? `${adapter.memoryMb.toLocaleString()} MB 显存（设备报告）` : '显存信息未提供'}</small></div></div>) : <p className="muted">{detecting ? '正在读取设备信息…' : '当前环境未提供显示设备信息，CPU 功能可正常使用。'}</p>}</section><section className="panel policy-panel"><h3><Settings2 size={17} />自动选择策略</h3><p><CheckCircle2 size={15} />小图像优先使用 CPU，减少数据传输开销。</p><p><CheckCircle2 size={15} />CUDA 自检通过后，较大图像可使用 GPU。</p><p><CheckCircle2 size={15} />GPU 计算失败时，重新执行 CPU 特征分析。</p><p><CheckCircle2 size={15} />硬件编码失败时，尝试可用的软件编码器。</p><small>第一版 GPU 计算后端支持 NVIDIA CUDA。AMD / Intel 硬件编码能力单独检测。</small></section></div></section>}
 
@@ -409,8 +464,8 @@ export default function App() {
 
     {notice && <div className={`toast ${notice.error ? 'error' : ''}`} role={notice.error ? 'alert' : 'status'}>{notice.error ? <CircleHelp size={18} /> : <CheckCircle2 size={18} />}<span>{notice.text}</span><button className="icon-button" aria-label="关闭通知" onClick={() => setNotice(null)}><X size={16} /></button></div>}
 
-    {modal && <div className="modal-backdrop" onClick={event => { if (event.target === event.currentTarget) setModal(null); }}><section className={`modal panel ${modal === 'principle' ? 'principle-modal' : ''}`} role="dialog" aria-modal="true" aria-label={modal === 'export' ? '导出作品' : modal === 'principle' ? '工作原理' : '使用指南'}><button className="modal-close icon-button" aria-label="关闭对话框" onClick={() => setModal(null)}><X size={20} /></button>
-      {modal === 'principle' ? <><span className="modal-symbol"><Workflow size={27} /></span><div className="eyebrow">THE SCIENCE BEHIND THE STROKES</div><h2>一幅画，是怎样发生的？</h2><p className="modal-description">从原图的结构与颜色出发，计算出可以逐笔播放的绘画过程。</p><Principle /></> : modal === 'help' ? <><span className="modal-symbol"><Feather size={28} /></span><div className="eyebrow">A LITTLE GUIDE</div><h2>从图片，到一笔一画。</h2><p className="modal-description">绘序成境将图像转化为有路径、颜色和时间的数字笔触。无需联网，也可以从内置示例开始。</p><div className="guide-steps"><div><b>01</b><span><strong>选择一张图片</strong><small>点击左侧缩略图上传，或直接拖入画布。</small></span></div><div><b>02</b><span><strong>设定你的绘画节奏</strong><small>选择精度、动画时长和计算设备，点击开始绘制。</small></span></div><div><b>03</b><span><strong>看它慢慢成为风景</strong><small>拖动时间轴、逐笔查看，点击图层跳转阶段。</small></span></div><div><b>04</b><span><strong>保存与分享</strong><small>HTML 保留交互；MP4 用于播放与分享。任务会自动保存在作品集。</small></span></div></div><button className="button primary modal-primary" onClick={() => setModal(null)}>开始创作<ArrowRight size={17} /></button></> : <><span className="modal-symbol"><ArrowDownToLine size={27} /></span><div className="eyebrow">LET YOUR CREATION TRAVEL</div><h2>把这一刻，带走。</h2><p className="modal-description">{title} · {work?.stats.count.toLocaleString()} 笔 · {Math.round(duration / 1000)} 秒</p><a className="export-option" href={`/api/tasks/${activeId}/html`} download><span className="export-icon"><FileImage size={24} /></span><span><strong>交互式 HTML</strong><small>单文件离线播放，保留逐笔与时间轴控制</small></span><Download size={19} /></a><div className="video-export-box"><div className="export-option video-option"><span className="export-icon"><Video size={24} /></span><span><strong>MP4 视频</strong><small>直接录制绘画画布，保留完整绘制过程</small></span></div><div className="video-settings"><label>方式<select aria-label="视频导出方式" value={exportMode} disabled={exporting} onChange={event => setExportMode(event.target.value as 'realtime' | 'frames')}><option value="realtime">实时录制</option><option value="frames">逐帧导出</option></select></label><label>帧率<select value={fps} disabled={exporting} onChange={event => setFps(Number(event.target.value) as 24 | 30 | 60)}>{[24, 30, 60].map(value => <option value={value} key={value}>{value} FPS</option>)}</select></label>{exportMode === 'frames' && <label className="checkbox-label"><input type="checkbox" checked={hardwareEncode} disabled={exporting} onChange={event => setHardwareEncode(event.target.checked)} />优先硬件编码</label>}</div><p className="export-mode-note">{exportMode === 'realtime' ? `画布直接录制，预计约 ${Math.round(duration / 1000)} 秒，另需少量封装时间；期间可继续使用电脑。` : '按固定时间逐帧输出，适合需要精确帧率的作品，耗时取决于画面尺寸。'}</p>{exporting && <div className="export-progress"><div className="progress-track"><span style={{ width: `${Math.max(2, (videoState?.progress || 0) * 100)}%` }} /></div><div><span>{videoState?.status === 'queued' ? '等待导出' : videoState?.mode === 'realtime' ? ({ preparing: '正在准备录制', recording: '正在录制画布', packaging: '正在封装 MP4', encoding: '正在转换 MP4' }[videoState.phase || 'preparing'] || '正在完成录制') : `正在导出 · ${videoState?.encoder || ''}`}</span><strong>{Math.round((videoState?.progress || 0) * 100)}%</strong></div></div>}{videoState?.status === 'failed' && <p className="error-message">{videoState.error}</p>}{videoState?.status === 'cancelled' && <p className="muted">导出已取消，可以重新开始。</p>}<div className="export-actions">{exporting ? <button className="button secondary" onClick={() => void cancelExport()}><X size={15} />取消导出</button> : <button className="button primary" disabled={videoSubmitting || !hardware?.ffmpeg || (exportMode === 'frames' && !hardware?.encoders.length)} onClick={() => void exportVideo()}>{videoSubmitting ? <LoaderCircle size={16} className="spin" /> : <Video size={16} />}{videoState?.status === 'done' ? '重新导出' : '生成 MP4'}</button>}{videoState?.status === 'done' && <a className="button secondary" href={`/api/tasks/${activeId}/video`} download><Download size={16} />下载视频</a>}</div></div><div className="export-footnote"><ShieldCheck size={13} />导出在本机完成，不上传图片。视频渲染可能需要一些时间。</div></>}
+    {modal && <div className="modal-backdrop" onClick={event => { if (event.target === event.currentTarget && !deleting) setModal(null); }}><section className={`modal panel ${modal === 'principle' ? 'principle-modal' : modal === 'delete' ? 'delete-modal' : ''}`} role="dialog" aria-modal="true" aria-label={modal === 'delete' ? '删除作品' : modal === 'export' ? '导出作品' : modal === 'principle' ? '工作原理' : '使用指南'}><button className="modal-close icon-button" aria-label="关闭对话框" disabled={deleting} onClick={() => setModal(null)}><X size={20} /></button>
+      {modal === 'delete' ? <><span className="modal-symbol delete-symbol"><Trash2 size={26} /></span><h2>{deletionTask?.deleted_at ? '彻底删除这幅作品？' : '移入回收站？'}</h2><p className="modal-description">{deletionTask?.deleted_at ? '将永久删除应用内的原图副本、笔触数据和导出文件，无法撤销。' : '作品会从作品集中移除，可在回收站恢复。文件暂时保留在本机。'}</p>{deletionTask && <div className="delete-work-summary"><img src={`/api/tasks/${deletionTask.id}/source`} alt="待删除作品缩略图" /><div><strong>{deletionTask.title}</strong><small>{deletionTask.stats ? `${deletionTask.stats.count.toLocaleString()} 笔 · ` : ''}{deletionTask.settings.duration} 秒</small></div></div>}{deleteBlockReason(deletionTask) && <p className="error-message">{deleteBlockReason(deletionTask)}</p>}<div className="delete-actions"><button className="button secondary" disabled={deleting} onClick={() => setModal(null)}>保留作品</button><button className="button danger" disabled={deleting || !deletionTask || !!deleteBlockReason(deletionTask)} onClick={() => void deleteWork()}>{deleting ? <LoaderCircle size={16} className="spin" /> : <Trash2 size={16} />}{deleting ? '正在处理…' : deletionTask?.deleted_at ? '彻底删除' : '移入回收站'}</button></div></> : modal === 'principle' ? <><span className="modal-symbol"><Workflow size={27} /></span><div className="eyebrow">THE SCIENCE BEHIND THE STROKES</div><h2>一幅画，是怎样发生的？</h2><p className="modal-description">从原图的结构与颜色出发，计算出可以逐笔播放的绘画过程。</p><Principle /></> : modal === 'help' ? <><span className="modal-symbol"><Feather size={28} /></span><div className="eyebrow">A LITTLE GUIDE</div><h2>从图片，到一笔一画。</h2><p className="modal-description">绘序成境将图像转化为有路径、颜色和时间的数字笔触。无需联网，也可以从内置示例开始。</p><div className="guide-steps"><div><b>01</b><span><strong>选择一张图片</strong><small>点击左侧缩略图上传，或直接拖入画布。</small></span></div><div><b>02</b><span><strong>设定你的绘画节奏</strong><small>选择精度、动画时长和计算设备，点击开始绘制。</small></span></div><div><b>03</b><span><strong>看它慢慢成为风景</strong><small>拖动时间轴、逐笔查看，点击图层跳转阶段。</small></span></div><div><b>04</b><span><strong>保存与分享</strong><small>HTML 保留交互；MP4 用于播放与分享。任务会自动保存在作品集。</small></span></div></div><button className="button primary modal-primary" onClick={() => setModal(null)}>开始创作<ArrowRight size={17} /></button></> : <><span className="modal-symbol"><ArrowDownToLine size={27} /></span><div className="eyebrow">LET YOUR CREATION TRAVEL</div><h2>把这一刻，带走。</h2><p className="modal-description">{title} · {work?.stats.count.toLocaleString()} 笔 · {Math.round(duration / 1000)} 秒</p><a className="export-option" href={`/api/tasks/${activeId}/html`} download><span className="export-icon"><FileImage size={24} /></span><span><strong>交互式 HTML</strong><small>单文件离线播放，保留逐笔与时间轴控制</small></span><Download size={19} /></a><a className="export-option" href={`/api/tasks/${activeId}/project`} download><span className="export-icon"><FolderOpen size={24}/></span><span><strong>可编辑工程 .strokescape</strong><small>包含原图和完整笔触，可导入后继续精修</small></span><Download size={19}/></a><div className="video-export-box"><div className="export-option video-option"><span className="export-icon"><Video size={24} /></span><span><strong>MP4 视频</strong><small>直接录制绘画画布，保留完整绘制过程</small></span></div><div className="video-settings"><label>方式<select aria-label="视频导出方式" value={exportMode} disabled={exporting} onChange={event => setExportMode(event.target.value as 'realtime' | 'frames')}><option value="realtime">实时录制</option><option value="frames">逐帧导出</option></select></label><label>帧率<select value={fps} disabled={exporting} onChange={event => setFps(Number(event.target.value) as 24 | 30 | 60)}>{[24, 30, 60].map(value => <option value={value} key={value}>{value} FPS</option>)}</select></label>{exportMode === 'frames' && <label className="checkbox-label"><input type="checkbox" checked={hardwareEncode} disabled={exporting} onChange={event => setHardwareEncode(event.target.checked)} />优先硬件编码</label>}</div><p className="export-mode-note">{exportMode === 'realtime' ? `画布直接录制，预计约 ${Math.round(duration / 1000)} 秒，另需少量封装时间；期间可继续使用电脑。` : '按固定时间逐帧输出，适合需要精确帧率的作品，耗时取决于画面尺寸。'}</p>{exporting && <div className="export-progress"><div className="progress-track"><span style={{ width: `${Math.max(2, (videoState?.progress || 0) * 100)}%` }} /></div><div><span>{videoState?.status === 'queued' ? '等待导出' : videoState?.mode === 'realtime' ? ({ preparing: '正在准备录制', recording: '正在录制画布', packaging: '正在封装 MP4', encoding: '正在转换 MP4' }[videoState.phase || 'preparing'] || '正在完成录制') : `正在导出 · ${videoState?.encoder || ''}`}</span><strong>{Math.round((videoState?.progress || 0) * 100)}%</strong></div></div>}{videoState?.status === 'failed' && <p className="error-message">{videoState.error}</p>}{videoState?.status === 'cancelled' && <p className="muted">导出已取消，可以重新开始。</p>}<div className="export-actions">{exporting ? <button className="button secondary" onClick={() => void cancelExport()}><X size={15} />取消导出</button> : <button className="button primary" disabled={videoSubmitting || !hardware?.ffmpeg || (exportMode === 'frames' && !hardware?.encoders.length)} onClick={() => void exportVideo()}>{videoSubmitting ? <LoaderCircle size={16} className="spin" /> : <Video size={16} />}{videoState?.status === 'done' ? '重新导出' : '生成 MP4'}</button>}{videoState?.status === 'done' && <a className="button secondary" href={`/api/tasks/${activeId}/video`} download><Download size={16} />下载视频</a>}</div></div><div className="export-footnote"><ShieldCheck size={13} />导出在本机完成，不上传图片。视频渲染可能需要一些时间。</div></>}
     </section></div>}
   </div>;
 }
