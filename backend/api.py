@@ -45,6 +45,7 @@ class Settings(BaseModel):
 class VideoSettings(BaseModel):
     fps: Literal[24, 30, 60] = 30
     hardware: bool = True
+    mode: Literal["realtime", "frames"] = "realtime"
 
 
 def generate_worker(task_id: str, settings: dict, cuda: dict):
@@ -266,10 +267,10 @@ def start_video(task_id: str, options: VideoSettings):
         caps = capabilities()
         software = {"libx264", "libopenh264", "h264_mf", "mpeg4"}
         encoders = caps["encoders"] if options.hardware else [e for e in caps["encoders"] if e in software]
-        if not encoders:
+        if not caps["ffmpeg"] or (options.mode == "frames" and not encoders):
             raise HTTPException(422, "未检测到可用的视频编码器")
         (storage.task_dir(task_id) / "export.cancel").unlink(missing_ok=True)
-        storage.update(task_id, export_state={"status": "queued", "progress": 0})
+        storage.update(task_id, export_state={"status": "queued", "progress": 0, "mode": options.mode})
         export_futures[task_id] = exports.submit(encode_video, task_id, options.model_dump(), encoders)
     return require_task(task_id)
 

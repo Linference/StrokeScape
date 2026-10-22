@@ -295,6 +295,8 @@ button:disabled { opacity: .35; }
 .video-option, .video-option:hover { background: transparent; }
 .video-settings label { color: #a2ae81; font-size: 11px; }
 .video-settings select { background: #1c2c1b; color: #d2c792; border-color: #b2b4772b; font-size: 11px; }
+.video-settings { flex-wrap: wrap; }
+.export-mode-note { color: #a2ae81; font-size: 11px; line-height: 1.7; margin: -5px 20px 17px; }
 .checkbox-label input { accent-color: #c7b177; }
 .export-progress > div + div { color: #a4b07d; font-size: 11px; }
 .export-footnote { color: #869d6e; font-size: 10px; }

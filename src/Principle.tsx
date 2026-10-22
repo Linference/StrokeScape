@@ -6,7 +6,7 @@ const steps = [
   { icon: ScanLine, name: '感知结构', en: 'ANALYZE', title: '找到画面里，看不见的方向。', description: '用 Sobel 梯度寻找明暗变化，再用结构张量估计局部方向与方向一致性，让笔触顺着边缘、发丝和衣褶延伸。', detail: 'CuPy 可选加速这一阶段的密集数组运算。' },
   { icon: Layers3, name: '生成笔触', en: 'PAINT', title: '从大色块，走向微小细节。', description: '依次铺底、塑形、勾线、补充细节。反复比较当前画布和原图，优先采样误差较大的区域，再沿结构方向生成路径与颜色。', detail: '当前实现为残差引导采样；候选笔触的增益优化仍有研究空间。' },
   { icon: Timer, name: '安排时间', en: 'SEQUENCE', title: '每一笔，都有属于它的时刻。', description: '根据路径长度与图层分配持续时间，上一笔结束后下一笔才开始，图层之间留出短暂停顿。', detail: '保存路径、颜色、宽度、透明度、开始时间与持续时间。' },
-  { icon: Route, name: '播放与导出', en: 'RENDER', title: '把静态图像，展开为绘画过程。', description: 'Canvas 按时间逐步画出路径，累计保存已完成的笔触；HTML 保留交互，视频则按固定帧率渲染并交给 FFmpeg 编码。', detail: '预览、HTML 和视频共用绘画渲染代码。' },
+  { icon: Route, name: '播放与导出', en: 'RENDER', title: '把静态图像，展开为绘画过程。', description: 'Canvas 按时间逐步画出路径，累计保存已完成的笔触；HTML 保留交互，视频可以直接录制画布，也可选择逐帧导出。', detail: '实时录制只记录画布，预览、HTML 和视频共用绘画渲染代码。' },
 ];
 
 export default function Principle() {

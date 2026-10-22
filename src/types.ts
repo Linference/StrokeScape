@@ -7,7 +7,7 @@ export interface Work {
   strokes: Stroke[]; layers: number[]; settings: Settings;
   stats: { count: number; computeSeconds: number; backend: string; gpuScope?: string; fallback?: string; seed: number };
 }
-export interface ExportState { status?: string; progress?: number; encoder?: string; error?: string; seconds?: number }
+export interface ExportState { status?: string; progress?: number; encoder?: string; error?: string; seconds?: number; mode?: 'realtime' | 'frames'; phase?: string }
 export interface Task {
   id: string; title: string; created_at: string; status: string; progress: number; stage: string;
   settings: Settings; stats: Work['stats'] | null; error: string | null; export_state: ExportState;

@@ -62,10 +62,14 @@ def encode_video(task_id: str, options: dict, encoders: list[str]):
     output = directory / "painting.mp4"
     temporary = directory / "painting.partial.mp4"
     executable = ffmpeg_path()
-    if not executable or not encoders:
+    if not executable or (not encoders and options.get("mode", "realtime") == "frames"):
         storage.update(task_id, export_state={"status": "failed", "error": "没有可用的视频编码器，请检查 FFmpeg 组件是否完整"})
         return
     fps = options.get("fps", 30)
+    if options.get("mode", "realtime") == "realtime":
+        from .recorder import record_video
+        record_video(task_id, options, encoders, executable, browser_options(), shared_renderer())
+        return
     width = work["width"] + work["width"] % 2
     height = work["height"] + work["height"] % 2
     frames = math.ceil(work["durationMs"] / 1000 * fps) + 1

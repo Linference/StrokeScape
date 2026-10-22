@@ -6,6 +6,7 @@ project = Path(SPECPATH).parent
 data_files = [
     (str(project / 'web-dist'), 'web-dist'),
     (str(project / 'public' / 'renderer.js'), 'public'),
+    (str(project / 'public' / 'recording.js'), 'public'),
 ]
 data_files += collect_data_files('webview')
 data_files += copy_metadata('pywebview')
